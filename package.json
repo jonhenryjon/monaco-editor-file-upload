@@ -1,0 +1,20 @@
+{
+  "name": "monaco-editor-project",
+  "scripts": {
+    "build": "node ./node_modules/webpack/bin/webpack.js --progress --mode development",
+    "start": "webpack serve --open --mode development",
+    "development": "webpack serve --mode development"
+  },
+  "dependencies": {
+    "css-loader": "^7.1.2",
+    "file-loader": "^6.2.0",
+    "monaco-editor": "^0.52.2",
+    "monaco-editor-webpack-plugin": "^7.1.0",
+    "style-loader": "^4.0.0",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "devDependencies": {
+    "webpack-dev-server": "^5.2.3"
+  }
+}
