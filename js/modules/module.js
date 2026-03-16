@@ -29,69 +29,52 @@ const schema = {
 		}
 	},
 	required: ['file']
-}
+};
 
 const modelUri = monaco.Uri.parse('inmemory://model/foo.json');
 
 monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
 	validate: true,
-	schemas: [{
-		uri: 'https://myserver/foo-schema.json',
-		fileMatch: [modelUri.toString()],
-		schema
-	}]
+	schemas: [
+		{
+			uri: 'https://myserver/foo-schema.json',
+			fileMatch: [modelUri.toString()],
+			schema
+		}
+	]
 });
 
-const model = monaco.editor.createModel(
-	'{\n  "file": ""\n}',
-	'json',
-	modelUri
-);
+const model = monaco.editor.createModel('{\n  "file": ""\n}', 'json', modelUri);
+const editor = monaco.editor.create(document.getElementById('container'), { model });
 
-const editor = monaco.editor.create(document.getElementById('container'), {
-	model
-});
-
-const fileWidgetStyles = document.createElement('style');
-fileWidgetStyles.textContent = `
+const fileInputStyles = document.createElement('style');
+fileInputStyles.textContent = `
 	.monaco-editor .file-value-hidden {
 		opacity: 0;
 	}
 `;
-document.head.appendChild(fileWidgetStyles);
+document.head.appendChild(fileInputStyles);
 
-const fileInput = document.createElement('input');
-fileInput.type = 'file';
-fileInput.hidden = true;
-document.body.appendChild(fileInput);
+const fileInput = document.getElementById('file-input');
+const messageDisplay = document.getElementById('message');
+const fileValueDecorations = editor.createDecorationsCollection();
 
-let fileValueDecorationIds = [];
-let currentFileFieldState = null;
+let fileValueRange = null;
 
-const fileButton = document.createElement('button');
-fileButton.type = 'button';
-fileButton.textContent = 'Choose file';
-fileButton.style.position = 'absolute';
-fileButton.style.display = 'none';
-fileButton.style.zIndex = '20';
-fileButton.style.cursor = 'pointer';
-fileButton.style.minWidth = '125px';
-fileButton.style.padding = '0 10px';
-fileButton.style.border = '1px solid #0f172a';
-fileButton.style.borderRadius = '6px';
-fileButton.style.background = '#ffffff';
-fileButton.style.color = '#0f172a';
-fileButton.addEventListener('click', () => fileInput.click());
-editor.getDomNode().appendChild(fileButton);
+fileInput.hidden = false;
+fileInput.style.position = 'absolute';
+fileInput.style.display = 'none';
+fileInput.style.zIndex = '20';
+editor.getDomNode().appendChild(fileInput);
 
-const hideFileButton = () => {
-	currentFileFieldState = null;
-	fileButton.style.display = 'none';
-	fileValueDecorationIds = editor.deltaDecorations(fileValueDecorationIds, []);
+const setMessage = (message, type = '') => {
+	messageDisplay.textContent = message;
+	messageDisplay.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : '';
 };
 
-const getFileFieldState = () => {
-	const source = model.getValue();
+const parseModelJson = (source) => JSON.parse(source);
+
+const getFileValueRange = (source) => {
 	const fileEntryMatch = /"file"\s*:\s*("([^"\\]|\\.)*")/.exec(source);
 
 	if (!fileEntryMatch) {
@@ -103,117 +86,122 @@ const getFileFieldState = () => {
 	const valueStart = model.getPositionAt(valueOffset);
 	const valueEnd = model.getPositionAt(valueOffset + valueText.length);
 
-	return {
-		hasValue: valueText !== '""',
-		valueRange: new monaco.Range(
-			valueStart.lineNumber,
-			valueStart.column,
-			valueEnd.lineNumber,
-			valueEnd.column
-		)
-	};
+	return new monaco.Range(
+		valueStart.lineNumber,
+		valueStart.column,
+		valueEnd.lineNumber,
+		valueEnd.column
+	);
 };
 
-const layoutFileButton = () => {
-	if (!currentFileFieldState) {
-		fileButton.style.display = 'none';
+const hideInlineFileInput = () => {
+	fileValueRange = null;
+	fileInput.style.display = 'none';
+	fileValueDecorations.clear();
+};
+
+const positionInlineFileInput = () => {
+	if (!fileValueRange) {
+		fileInput.style.display = 'none';
 		return;
 	}
 
 	const visiblePosition = editor.getScrolledVisiblePosition({
-		lineNumber: currentFileFieldState.valueRange.startLineNumber,
-		column: currentFileFieldState.valueRange.startColumn
+		lineNumber: fileValueRange.startLineNumber,
+		column: fileValueRange.startColumn
 	});
 
 	if (!visiblePosition) {
-		fileButton.style.display = 'none';
+		fileInput.style.display = 'none';
 		return;
 	}
 
-	fileButton.style.display = 'block';
-	fileButton.style.left = `${visiblePosition.left}px`;
-	fileButton.style.top = `${visiblePosition.top}px`;
-	fileButton.style.height = `${Math.max(visiblePosition.height - 4, 20)}px`;
-};
-
-const showFileButton = (fileFieldState) => {
-	currentFileFieldState = fileFieldState;
-	fileButton.textContent = fileFieldState.hasValue ? 'Replace file' : 'Choose file';
-
-	fileValueDecorationIds = editor.deltaDecorations(fileValueDecorationIds, [
-		{
-			range: fileFieldState.valueRange,
-			options: {
-				inlineClassName: 'file-value-hidden',
-				inlineClassNameAffectsLetterSpacing: true
-			}
-		}
-	]);
-
-	layoutFileButton();
-};
-
-const syncFileButton = () => {
-	try {
-		const json = JSON.parse(model.getValue());
-
-		if (!json || typeof json !== 'object' || Array.isArray(json) || !Object.prototype.hasOwnProperty.call(json, 'file')) {
-			hideFileButton();
-			return;
-		}
-
-		const fileFieldState = getFileFieldState();
-
-		if (!fileFieldState) {
-			hideFileButton();
-			return;
-		}
-
-		showFileButton(fileFieldState);
-	} catch {
-		hideFileButton();
-	}
+	fileInput.style.display = 'block';
+	fileInput.style.left = `${visiblePosition.left}px`;
+	fileInput.style.top = `${visiblePosition.top}px`;
 };
 
 const updateFileField = (nextValue) => {
-	const json = JSON.parse(model.getValue());
+	const json = parseModelJson(model.getValue());
 	json.file = nextValue;
 	model.setValue(`${JSON.stringify(json, null, 2)}\n`);
 };
 
-fileInput.addEventListener('change', async (event) => {
-	const selectedFile = event.target.files && event.target.files[0];
+const syncInlineFileInput = () => {
+	try {
+		const source = model.getValue();
+		const json = parseModelJson(source);
 
-	if (!selectedFile) {
+		if (!Object.prototype.hasOwnProperty.call(json, 'file')) {
+			hideInlineFileInput();
+			return;
+		}
+
+		fileValueRange = getFileValueRange(source);
+
+		if (!fileValueRange) {
+			hideInlineFileInput();
+			return;
+		}
+
+		fileValueDecorations.set([
+			{
+				range: fileValueRange,
+				options: {
+					inlineClassName: 'file-value-hidden',
+					inlineClassNameAffectsLetterSpacing: true
+				}
+			}
+		]);
+
+		positionInlineFileInput();
+	} catch {
+		hideInlineFileInput();
+	}
+};
+
+const readTextFile = (file) =>
+	new Promise((resolve, reject) => {
+		const reader = new FileReader();
+
+		reader.onload = () => {
+			resolve(typeof reader.result === 'string' ? reader.result : '');
+		};
+
+		reader.onerror = () => {
+			reject(reader.error || new Error('Unable to read the selected file.'));
+		};
+
+		reader.readAsText(file);
+	});
+
+const handleFileSelection = async (event) => {
+	const file = event.target.files && event.target.files[0];
+
+	setMessage('');
+
+	if (!file) {
+		setMessage('No file selected. Please choose a file.', 'error');
 		return;
 	}
 
-	const base64Value = await new Promise((resolve, reject) => {
-		const reader = new FileReader();
+	if (!file.type.startsWith('text')) {
+		setMessage('Unsupported file type. Please select a text file.', 'error');
+		fileInput.value = '';
+		return;
+	}
 
-		reader.addEventListener('load', () => {
-			const result = reader.result;
+	try {
+		const content = await readTextFile(file);
+		updateFileField(content);
+	} catch {
+		setMessage('Error reading the file. Please try again.', 'error');
+		fileInput.value = '';
+	}
+};
 
-			if (typeof result !== 'string') {
-				reject(new Error('Unsupported file reader result.'));
-				return;
-			}
-
-			resolve(result.split(',')[1] || '');
-		});
-
-		reader.addEventListener('error', () => {
-			reject(reader.error || new Error('Unable to read the selected file.'));
-		});
-
-		reader.readAsDataURL(selectedFile);
-	});
-
-	updateFileField(base64Value);
-	fileInput.value = '';
-});
-
-editor.onDidScrollChange(layoutFileButton);
-editor.onDidLayoutChange(layoutFileButton);
-model.onDidChangeContent(syncFileButton);
-syncFileButton();
+fileInput.addEventListener('change', handleFileSelection);
+editor.onDidScrollChange(positionInlineFileInput);
+editor.onDidLayoutChange(positionInlineFileInput);
+model.onDidChangeContent(syncInlineFileInput);
+syncInlineFileInput();

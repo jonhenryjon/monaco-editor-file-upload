@@ -1,1 +1,1 @@
-import * as test from './modules/module.js';
+import './modules/module.js';
