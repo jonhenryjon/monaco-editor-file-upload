@@ -2,7 +2,6 @@ const path = require('path');
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 
 module.exports = {
-	mode: process.env.NODE_ENV,
 	entry: './js/index.js',
 	output: {
 		path: path.resolve(__dirname, 'dist'),
@@ -29,7 +28,7 @@ module.exports = {
 	},
 	plugins: [
 		new MonacoWebpackPlugin({
-			languages: ['typescript', 'javascript', 'css', 'json']
+			languages: ['json']
 		})
 	]
 };

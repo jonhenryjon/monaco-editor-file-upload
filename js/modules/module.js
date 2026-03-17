@@ -5,15 +5,6 @@ self.MonacoEnvironment = {
 		if (label === 'json') {
 			return './json.worker.js';
 		}
-		if (label === 'css' || label === 'scss' || label === 'less') {
-			return './css.worker.js';
-		}
-		if (label === 'html' || label === 'handlebars' || label === 'razor') {
-			return './html.worker.js';
-		}
-		if (label === 'typescript' || label === 'javascript') {
-			return './ts.worker.js';
-		}
 		return './editor.worker.js';
 	}
 };
@@ -25,6 +16,10 @@ const schema = {
 			pattern: '([A-Za-z0-9+/3]*([A-Za-z0-9+/]{3}=/[A-Za-z0-9+/]{2}==)?$)',
 			file: true,
 			title: 'File',
+			type: 'string'
+		},
+		name: {
+			title: 'Name',
 			type: 'string'
 		}
 	},
@@ -44,37 +39,58 @@ monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
 	]
 });
 
-const model = monaco.editor.createModel('{\n  "file": ""\n}', 'json', modelUri);
-const editor = monaco.editor.create(document.getElementById('container'), { model });
+const model = monaco.editor.createModel('{\n  "file": ""\n}\n', 'json', modelUri);
 
-const fileInputStyles = document.createElement('style');
-fileInputStyles.textContent = `
-	.monaco-editor .file-value-hidden {
-		opacity: 0;
-	}
-`;
-document.head.appendChild(fileInputStyles);
+const editor = monaco.editor.create(document.getElementById('container'), {
+	model
+});
 
-const fileInput = document.getElementById('file-input');
 const messageDisplay = document.getElementById('message');
 const fileValueDecorations = editor.createDecorationsCollection();
 
+const styles = document.createElement('style');
+styles.textContent = `
+	.monaco-editor .file-value-hidden {
+		opacity: 0;
+	}
+
+	.monaco-editor .inline-file-input {
+		box-sizing: border-box;
+		width: 240px;
+		max-width: 240px;
+	}
+`;
+document.head.appendChild(styles);
+
 let fileValueRange = null;
+let uploadedFileContent = '';
+let uploadedFileName = '';
 
-fileInput.hidden = false;
-fileInput.style.position = 'absolute';
-fileInput.style.display = 'none';
-fileInput.style.zIndex = '20';
-editor.getDomNode().appendChild(fileInput);
-
-const setMessage = (message, type = '') => {
+function setMessage(message, type = '') {
 	messageDisplay.textContent = message;
 	messageDisplay.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : '';
 };
 
-const parseModelJson = (source) => JSON.parse(source);
+function parseModelJson(source) {
+	if (typeof source === 'undefined') {
+		source = model.getValue();
+	}
 
-const getFileValueRange = (source) => {
+	return JSON.parse(source);
+}
+
+const hasFileProperty = (json) =>
+	Object.prototype.hasOwnProperty.call(json, 'file');
+
+const getUploadedPlaceholder = (filename) => `[uploaded: ${filename}]`;
+
+function resetUploadedFileState() {
+	uploadedFileContent = '';
+	uploadedFileName = '';
+	fileInput.value = '';
+};
+
+function getFileValueRange(source) {
 	const fileEntryMatch = /"file"\s*:\s*("([^"\\]|\\.)*")/.exec(source);
 
 	if (!fileEntryMatch) {
@@ -94,89 +110,112 @@ const getFileValueRange = (source) => {
 	);
 };
 
-const hideInlineFileInput = () => {
-	fileValueRange = null;
-	fileInput.style.display = 'none';
-	fileValueDecorations.clear();
-};
-
-const positionInlineFileInput = () => {
-	if (!fileValueRange) {
-		fileInput.style.display = 'none';
-		return;
-	}
-
-	const visiblePosition = editor.getScrolledVisiblePosition({
-		lineNumber: fileValueRange.startLineNumber,
-		column: fileValueRange.startColumn
-	});
-
-	if (!visiblePosition) {
-		fileInput.style.display = 'none';
-		return;
-	}
-
-	fileInput.style.display = 'block';
-	fileInput.style.left = `${visiblePosition.left}px`;
-	fileInput.style.top = `${visiblePosition.top}px`;
-};
-
-const updateFileField = (nextValue) => {
-	const json = parseModelJson(model.getValue());
+function updateFileField(nextValue) {
+	const json = parseModelJson();
 	json.file = nextValue;
 	model.setValue(`${JSON.stringify(json, null, 2)}\n`);
 };
 
-const syncInlineFileInput = () => {
-	try {
-		const source = model.getValue();
-		const json = parseModelJson(source);
-
-		if (!Object.prototype.hasOwnProperty.call(json, 'file')) {
-			hideInlineFileInput();
-			return;
-		}
-
-		fileValueRange = getFileValueRange(source);
-
-		if (!fileValueRange) {
-			hideInlineFileInput();
-			return;
-		}
-
-		fileValueDecorations.set([
-			{
-				range: fileValueRange,
-				options: {
-					inlineClassName: 'file-value-hidden',
-					inlineClassNameAffectsLetterSpacing: true
-				}
-			}
-		]);
-
-		positionInlineFileInput();
-	} catch {
-		hideInlineFileInput();
-	}
-};
-
-const readTextFile = (file) =>
-	new Promise((resolve, reject) => {
+function readTextFile(file) {
+	return new Promise(function (resolve, reject) {
 		const reader = new FileReader();
 
-		reader.onload = () => {
+		reader.onload = function () {
 			resolve(typeof reader.result === 'string' ? reader.result : '');
 		};
 
-		reader.onerror = () => {
+		reader.onerror = function () {
 			reject(reader.error || new Error('Unable to read the selected file.'));
 		};
 
 		reader.readAsText(file);
 	});
+}
 
-const handleFileSelection = async (event) => {
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.accept = 'text/*';
+fileInput.className = 'inline-file-input';
+
+const fileInputWidget = {
+	getId() {
+		return 'file-input-widget';
+	},
+	getDomNode() {
+		return fileInput;
+	},
+	getPosition() {
+		if (!fileValueRange || uploadedFileName) {
+			return null;
+		}
+
+		return {
+			position: {
+				lineNumber: fileValueRange.startLineNumber,
+				column: fileValueRange.startColumn
+			},
+			preference: [monaco.editor.ContentWidgetPositionPreference.EXACT]
+		};
+	}
+};
+
+editor.addContentWidget(fileInputWidget);
+
+function syncInlineFileInput() {
+	try {
+		const source = model.getValue();
+		const json = parseModelJson(source);
+
+		if (!hasFileProperty(json)) {
+			fileValueRange = null;
+			resetUploadedFileState();
+			fileValueDecorations.clear();
+			editor.layoutContentWidget(fileInputWidget);
+			return;
+		}
+
+		const expectedPlaceholder = uploadedFileName
+			? getUploadedPlaceholder(uploadedFileName)
+			: null;
+
+		if (expectedPlaceholder && json.file !== expectedPlaceholder) {
+			resetUploadedFileState();
+		}
+
+		fileValueRange = getFileValueRange(source);
+
+		if (!fileValueRange) {
+			fileValueDecorations.clear();
+			editor.layoutContentWidget(fileInputWidget);
+			return;
+		}
+
+		if (uploadedFileName) {
+			fileValueDecorations.clear();
+		} else {
+			fileValueDecorations.set([
+				{
+					range: fileValueRange,
+					options: {
+						inlineClassName: 'file-value-hidden',
+						inlineClassNameAffectsLetterSpacing: true
+					}
+				}
+			]);
+		}
+
+		editor.layoutContentWidget(fileInputWidget);
+	} catch {
+		fileValueRange = null;
+		fileValueDecorations.clear();
+		editor.layoutContentWidget(fileInputWidget);
+	}
+};
+
+async function handleFileSelection(event) {
 	const file = event.target.files && event.target.files[0];
+
+	console.log("test");
 
 	setMessage('');
 
@@ -185,7 +224,12 @@ const handleFileSelection = async (event) => {
 		return;
 	}
 
-	if (!file.type.startsWith('text')) {
+	const looksLikeText =
+		!file.type ||
+		file.type.startsWith('text/') ||
+		file.type === 'application/json';
+
+	if (!looksLikeText) {
 		setMessage('Unsupported file type. Please select a text file.', 'error');
 		fileInput.value = '';
 		return;
@@ -193,7 +237,18 @@ const handleFileSelection = async (event) => {
 
 	try {
 		const content = await readTextFile(file);
-		updateFileField(content);
+
+		uploadedFileContent = content;
+		uploadedFileName = file.name;
+
+		updateFileField(getUploadedPlaceholder(file.name));
+		
+		setMessage(`Uploaded ${content}.`, 'success');
+		
+		console.log('Visible editor value:', editor.getValue());
+		console.log('Submisson value:', getSubmissionString());
+
+		fileInput.value = '';
 	} catch {
 		setMessage('Error reading the file. Please try again.', 'error');
 		fileInput.value = '';
@@ -201,7 +256,29 @@ const handleFileSelection = async (event) => {
 };
 
 fileInput.addEventListener('change', handleFileSelection);
-editor.onDidScrollChange(positionInlineFileInput);
-editor.onDidLayoutChange(positionInlineFileInput);
 model.onDidChangeContent(syncInlineFileInput);
+editor.onDidLayoutChange(() => editor.layoutContentWidget(fileInputWidget));
+
 syncInlineFileInput();
+
+/**
+ * Use this when you need the real JSON payload.
+ * The Monaco editor keeps the short placeholder.
+ * Submission swaps that placeholder back to the real uploaded content.
+ */
+function getSubmissionJson() {
+	const json = parseModelJson();
+
+	if (uploadedFileName) {
+		json.file = uploadedFileContent;
+	}
+
+	return json;
+};
+
+const getSubmissionString = () =>
+	`${JSON.stringify(getSubmissionJson(), null, 2)}\n`;
+
+// Optional: expose helpers for debugging/demo
+window.getSubmissionJson = getSubmissionJson;
+window.getSubmissionString = getSubmissionString;
