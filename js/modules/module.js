@@ -18,6 +18,12 @@ const schema = {
 			title: 'File',
 			type: 'string'
 		},
+		download: {
+			pattern: '([A-Za-z0-9+/3]*([A-Za-z0-9+/]{3}=/[A-Za-z0-9+/]{2}==)?$)',
+			file: true,
+			title: 'Download',
+			type: 'string'
+		},
 		name: {
 			title: 'Name',
 			type: 'string'
@@ -79,6 +85,7 @@ function parseModelJson(source) {
 	return JSON.parse(source);
 }
 
+// Checks literally for the key 'file'
 const hasFileProperty = (json) =>
 	Object.prototype.hasOwnProperty.call(json, 'file');
 
@@ -91,6 +98,7 @@ function resetUploadedFileState() {
 };
 
 function getFileValueRange(source) {
+	// Tied specifically to the same key!
 	const fileEntryMatch = /"file"\s*:\s*("([^"\\]|\\.)*")/.exec(source);
 
 	if (!fileEntryMatch) {
@@ -116,26 +124,11 @@ function updateFileField(nextValue) {
 	model.setValue(`${JSON.stringify(json, null, 2)}\n`);
 };
 
-function readTextFile(file) {
-	return new Promise(function (resolve, reject) {
-		const reader = new FileReader();
-
-		reader.onload = function () {
-			resolve(typeof reader.result === 'string' ? reader.result : '');
-		};
-
-		reader.onerror = function () {
-			reject(reader.error || new Error('Unable to read the selected file.'));
-		};
-
-		reader.readAsText(file);
-	});
-}
-
 const fileInput = document.createElement('input');
 fileInput.type = 'file';
 fileInput.accept = 'text/*';
 fileInput.className = 'inline-file-input';
+fileInput.style.transform = 'translateY(-2px)';
 
 const fileInputWidget = {
 	getId() {
@@ -165,7 +158,8 @@ function syncInlineFileInput() {
 	try {
 		const source = model.getValue();
 		const json = parseModelJson(source);
-
+		
+		// No longer has the file key
 		if (!hasFileProperty(json)) {
 			fileValueRange = null;
 			resetUploadedFileState();
@@ -213,9 +207,7 @@ function syncInlineFileInput() {
 };
 
 async function handleFileSelection(event) {
-	const file = event.target.files && event.target.files[0];
-
-	console.log("test");
+	const file = event.target.files?.[0];
 
 	setMessage('');
 
@@ -224,19 +216,14 @@ async function handleFileSelection(event) {
 		return;
 	}
 
-	const looksLikeText =
-		!file.type ||
-		file.type.startsWith('text/') ||
-		file.type === 'application/json';
-
-	if (!looksLikeText) {
+	if (!file.type.startsWith('text/')) {
 		setMessage('Unsupported file type. Please select a text file.', 'error');
 		fileInput.value = '';
 		return;
 	}
 
 	try {
-		const content = await readTextFile(file);
+		const content = await file.text();
 
 		uploadedFileContent = content;
 		uploadedFileName = file.name;
